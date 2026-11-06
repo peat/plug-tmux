@@ -105,9 +105,9 @@ simpler config and command line. (His 2009 words were blunter: "a lot of baggage
                disconnect   hang up: SIGHUP, exit       no SIGHUP, keeps running
 ```
 
-%indent 11
-- Lose the connection and you lose a client. Attach a new one.
-- And everything in tmux is a command. (We'll abuse that later.)
+%indent 6
+- A disconnection only loses the client; you can reattach and keep on going.
+- Commands are sent over a socket to the server. We'll abuse them later ...
 
 === words
 ## The words
