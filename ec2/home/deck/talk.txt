@@ -139,7 +139,7 @@ leftovers (old Life build, private servers), rebuilds the deck, and checks Claud
 
 === !claude: cd ~/plug && claude
 --- notes
-Send the prompt and leave. Life shows up as a window named "life" right after this one.
+Send the prompt and leave. Life shows up as a window named "life" right after the check-in slide.
 
 @act Basics
 === keys
@@ -172,7 +172,7 @@ $ tmux attach -t talk
 --- notes
 Close the whole Ghostty window (not a tab). Pause. Anyone on watch still sees this slide.
 New window: ssh presentation@tmux.peat.org · tmux ls · tmux attach -t talk
-"talk ... (attached)" in tmux ls: with me gone, who's attached? (Tease it; the plot twist answers it.)
+"talk ... (attached)" in tmux ls: with me gone, who's attached? (Tease it; the head count after the fight answers it.)
 Back on this slide: C-b p, C-b n a few times. Nothing moved. Claude is still working a few windows back.
 
 === sharing
@@ -190,7 +190,7 @@ Why 443: campus wifi may block outbound 22, never 443. Plain port 22 works too, 
 
 === !fight: sudo -u demo env -u TMUX /usr/local/bin/tmux -L fight attach -t fight
 --- notes
-Let it run 2-3 minutes. Point at the "N fighters" counter. You can type too.
+Let it run 2-3 minutes. Point at the "N fighters" counter (one high: it counts the deck's own fight window). You can type too.
 
 === !clients: ~/deck/clients.sh
 --- notes
@@ -239,10 +239,11 @@ It started as `td`. Reviewer carlosala: "there's a tool out there called td. May
 
 === !tds-demo: env -u TMUX bash --rcfile ~/deck/demo.bashrc -i
 --- notes
-C-b e. mkdir -p /tmp/example.com && cd /tmp/example.com && tds. Detach (C-b d), tds again: it reattaches.
-  (session is example_com-XXXXXX: the fix turned the . into _)
-The bug, the old way: command tmux new -As example.com, C-b d, then the same again.
-  Second time: "can't find pane: com". C-] back.
+This comes right after the tds slide, before the bug: show that it just works.
+C-b e. mkdir -p /tmp/myproject && cd /tmp/myproject && tds. Detach (C-b d), tds again: it reattaches. C-] back.
+Spoiler alert: the demo shell has the fixed tds, so in a dotted directory like /tmp/example.com the session
+is example_com-XXXXXX. The bug, the old way: command tmux new -As example.com, C-b d, then the same again.
+  Second time: "can't find pane: com".
 
 === tds-bug
 ## But wait! A bug!
@@ -368,8 +369,9 @@ Talking point at the pixels: the same trick, five times over, is Claude's status
 
 It's been building this the whole time.
 --- notes
-C-b w shows the window tree (good moment to show it). Pick "life". Talk through the README pane.
-C-b l jumps back to the last window.
+C-b n: "life" is the next window (Claude puts it right after this slide). Talk through the README pane.
+In life: s stops, g goes, r resets. C-b n again moves on to api.
+C-b w (the window tree) is still a nice thing to show here, if there's time.
 
 === api
 ## tmux is an API
