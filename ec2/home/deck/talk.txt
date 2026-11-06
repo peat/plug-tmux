@@ -102,7 +102,7 @@ simpler config and command line. (His 2009 words were blunter: "a lot of baggage
  │ terminal ▶ ssh │  ▶  │ sshd ▶ pty ▶ tmux client ~ tmux server ▶ pty ▶ bash ▶ job │
  └────────────────┘     └───────────────────────────────────────────────────────────┘
                      ▲    ╰───────────┬──────────╯   ╰──────────────┬─────────────╯
-            connection dies    hang up: SIGHUP, exit    no SIGHUP, keeps running
+               disconnect   hang up: SIGHUP, exit       no SIGHUP, keeps running
 ```
 
 %indent 11
