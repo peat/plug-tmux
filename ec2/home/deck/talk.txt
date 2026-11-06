@@ -207,7 +207,7 @@ Flip back and forth with C-b p / C-b n: the mayhem, then the head count. Counts 
 - systemd runs it: kill the server and it's back in seconds
 - limits and no outbound network, because it's still a real shell
 
-> Chaos mode: try pair programming in vi.
+> Chaos mode: try remote pair programming in vi.
 --- notes
 Fork bomb? Capped: 300 tasks, 2 GB, 1.5 CPUs for the fight (and 200 tasks / 1 GB per user). It only hurts the fight.
 
