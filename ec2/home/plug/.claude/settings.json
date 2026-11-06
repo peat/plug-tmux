@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": ["Bash", "Read", "Edit", "Write"],
+    "deny": ["WebFetch", "WebSearch", "Read(~/.fallback/**)"]
+  }
+}

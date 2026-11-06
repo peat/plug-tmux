@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# deck: the talk as a real tmux session. One window per slide; C-b n / C-b p to drive.
+#   deck            attach (building it first if needed)
+#   deck rebuild    rebuild from talk.txt (after adding or reordering slides)
+#   deck notes      print every slide's speaker notes
+#   deck follow     presenter view: live notes for the current slide (run it on your phone)
+#   deck check      is everything ready for the talk? (changes nothing)
+#   deck prep       clear rehearsal leftovers, rebuild, then check
+# Text edits to existing slides redraw live; no rebuild needed.
+set -euo pipefail
+export PATH=$HOME/.local/bin:$HOME/bin:$PATH   # claude, deck, tmux-ops; however deck was started
+DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+TALK=$DIR/talk.txt
+SOCK=${DECK_SOCKET:-/srv/plug/talk}            # shared, so 'watch' can attach read-only
+[[ -w $(dirname "$SOCK") ]] || SOCK=/tmp/deck-$UID   # off the box: plain private socket
+T=(tmux -S "$SOCK")
+
+build() {
+  # Rebuild-safe: build the new deck beside the old one, move every client over, then
+  # kill the old one. That last step may kill this very script if it runs inside the deck.
+  local old=""
+  if "${T[@]}" has-session -t =talk 2>/dev/null; then
+    "${T[@]}" kill-session -t =talk-old 2>/dev/null || true
+    "${T[@]}" rename-session -t =talk talk-old
+    old=talk-old
+  fi
+  local -a rows
+  mapfile -t rows < <(python3 "$DIR/render.py" --list "$TALK")
+  local idx name act cmd run first=1
+  for row in "${rows[@]}"; do
+    IFS=$'\t' read -r idx name act cmd <<<"$row"
+    if [[ -n $cmd ]]; then
+      run="cd ~ && $cmd; exec env -u TMUX bash -l"     # live window; drop to a shell if it exits
+    else
+      run="exec python3 $DIR/render.py --show $idx $TALK"
+    fi
+    if (( first )); then
+      "${T[@]}" -f "$DIR/deck.conf" new-session -d -s talk -x 120 -y 35 -n "$name" "$run"
+      "${T[@]}" source-file "$DIR/deck.conf"           # in case the server was already running
+      "${T[@]}" set-environment -g PATH "$PATH"        # windows inherit the server's env, not ours
+      first=0
+    else
+      "${T[@]}" new-window -d -t "talk:$idx" -n "$name" "$run"
+    fi
+    "${T[@]}" set -w -t "talk:$idx" @act "$act"
+  done
+  "${T[@]}" select-window -t talk:1
+  if id watch >/dev/null 2>&1; then                     # audience: read-only, enforced by the server
+    chmod g+rw "$SOCK"                                  # group plug may connect; tmux keeps rw bits
+    "${T[@]}" server-access -a watch 2>/dev/null || true
+    "${T[@]}" server-access -r watch
+  fi
+  link_default
+  if [[ -n $old ]]; then
+    "${T[@]}" list-clients -t "=$old" -F '#{client_name}' | while read -r c; do
+      "${T[@]}" switch-client -c "$c" -t =talk
+    done
+    "${T[@]}" kill-session -t "=$old"
+  fi
+}
+
+link_default() {
+  # Make plain `tmux ls` / `tmux attach -t talk` find the deck: point the default socket at it.
+  # Only for the real deck, and never on top of a default server that's actually running.
+  [[ $SOCK == /srv/plug/talk ]] || return 0
+  local dir=${TMUX_TMPDIR:-/tmp}/tmux-$UID link
+  link=$dir/default
+  mkdir -p -m 700 "$dir"
+  if [[ -S $link && ! -L $link ]] && tmux -S "$link" has-session 2>/dev/null; then
+    echo "deck: a separate default tmux server is running ($(tmux -S "$link" ls -F '#S' | paste -sd' ')); not linking it to the deck" >&2
+    return 0
+  fi
+  ln -sfn "$SOCK" "$link"
+}
+
+attach() { [[ -n ${TMUX:-} ]] && "${T[@]}" switch-client -t =talk || exec env -u TMUX "${T[@]}" attach -t =talk; }
+
+case ${1:-start} in
+  start)   "${T[@]}" has-session -t =talk 2>/dev/null || build; link_default; attach ;;
+  rebuild) if [[ -n ${TMUX:-} ]]; then build; else build; attach; fi ;;
+  build)   build ;;                                   # rebuild without attaching (used by prep)
+  check|prep) exec "$DIR/prep.sh" "$1" ;;
+  follow)  exec python3 "$DIR/render.py" --follow "$SOCK" "$TALK" ;;
+  notes)   python3 "$DIR/render.py" --notes "$TALK" | less -R ;;
+  *)       sed -n '2,9p' "$0"; exit 1 ;;
+esac

@@ -1,0 +1,12 @@
+# Publish only the deck, the box scripts and the Life fallback.
+/*
+!/.gitignore
+!/README.md
+!/ec2/
+!/life/
+
+# Per-box state and generated files: AWS resource IDs, filled-in user-data (with SSH public keys), host keys.
+/ec2/.state
+/ec2/.user-data
+/ec2/.known_hosts
+__pycache__/

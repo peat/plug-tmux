@@ -1,0 +1,441 @@
+// tmux @ PLUG, 2026-11-05. DRAFT: Claude drafted it, Peat rewrites it.
+// Format reference: see the top of render.py. Text edits redraw live; adding or
+// reordering slides needs `deck rebuild` (or C-b B).
+// Rough budget: Problem 8m · Basics 15m · Power 11m · Insane 11m · Future 5m · Q&A 10m
+
+@act Hello
+=== title
+# tmux @ PLUG
+
+##     The use (and abuse) of a terminal multiplexer
+
+     Portland Linux/Unix Group · November 5, 2026
+              Peat Bakke <peat@peat.org>
+
+
+>           Follow along in your own terminal:
+$ ssh -p 443 watch@tmux.peat.org        password: plug
+--- notes
+COLD OPEN, before this slide (bare laptop terminal, no deck yet):
+  1. ssh presentation@tmux.peat.org; run a counter: while :; do date; sleep 1; done
+  2. Kill the connection with the ssh escape: Enter ~ .
+  3. Reconnect. The counter is gone. "We've all been here."
+  4. Again inside tmux: tmux new -A -s cold, run the counter, ~. , reconnect, tmux attach -t cold
+  5. Still counting. "That's the talk. Thanks!" (beat) Then: deck
+Mention the watch account now, so people attach early (they show up in the head count after the fight).
+Watchers: make the window big, or shrink the font (Ctrl/Cmd -) if the slides are cut off.
+
+@act The Problem
+=== three-hours-in
+# 3 hours in
+
+- you ssh in and start the big job
+- something happens to the wifi
+- `client_loop: send disconnect: Broken pipe`
+- the job is gone
+--- notes
+Hands up: who has lost a long-running job to a dropped connection?
+
+=== why-it-dies
+## Why does the job die?
+
+```
+  your laptop                     the server
+ ┌──────────┐      ssh      ┌──────┐    ┌─────┐
+ │ terminal │ ────────────▶ │ sshd │ ─▶ │ pty │ ─▶ bash ─▶ your job
+ └──────────┘               └──────┘    └─────┘
+```
+
+**pty**: pseudo-terminal. A fake terminal device from the kernel, like `/dev/pts/3`.
+bash thinks it's a real terminal; sshd holds the other end. Run `tty` to see yours.
+
+- The connection drops. sshd notices (eventually) and closes the pty.
+- The kernel hangs up the terminal: SIGHUP to bash.
+- bash passes SIGHUP to its jobs. Default action: terminate. Goodbye, job.
+
+> "Hang up" is literal: it's from when your terminal was on the other end of a modem.
+
+=== early-answers
+## Early answers
+
+- `nohup job &`: ignore SIGHUP, output to nohup.out. Survives; you can't talk to it.
+- `job & disown`: bash forgets the job, so bash never passes on the SIGHUP.
+- `screen` (1987): keep the pty somewhere that doesn't hang up. Reattach later.
+
+=== screen
+## GNU screen
+
+- Oliver Laumann & Carsten Bormann, TU Berlin, 1987
+- The original: detach, reattach, many windows, sessions shared between users
+- Every multiplexer since, tmux included, follows the trail it blazed
+- A quiet stretch: no release between 4.0.3 (2008) and 4.2.0 (2014)
+- Maintained today: 5.0 (2024), 5.0.1 (2025), 5.0.2 (2026)
+
+> Who here still runs screen? Who's sent it a patch?
+--- notes
+There are screen users AND contributors in the room. Be warm; no digs.
+The quiet stretch is history, not a punchline: it's simply why people went looking.
+
+=== tmux-arrives
+## Then: tmux
+
+- Nicholas Marriott, 2007. The prototype was called "nscr".
+- He used screen, and wanted code that "was readable and could be extended"
+- 1.0 in 2009. That same year OpenBSD 4.6 put it in base, replacing window(1).
+- Today: tmux 3.8 (September 2026)
+
+--- notes
+window(1), if anyone asks: 4.3BSD (1986), nine windows on one terminal, ^P prefix, a C-like config
+language with if/else. No detach. OpenBSD deleted it June 2009 ("RIP; ok millert"); the 4.6 notes say tmux replaced it.
+Why tmux, out loud and gently: Marriott wanted a fresh, clean codebase he could read and extend, with a
+simpler config and command line. (His 2009 words were blunter: "a lot of baggage". Don't read that out.)
+
+=== the-trick
+# The trick
+%indent 15
+
+## The tmux server owns the ptys and doesn't get SIGHUP'd.
+
+```
+  your laptop             the server
+ ┌────────────────┐     ┌───────────────────────────────────────────────────────────┐
+ │ terminal ▶ ssh │  ▶  │ sshd ▶ pty ▶ tmux client ~ tmux server ▶ pty ▶ bash ▶ job │
+ └────────────────┘     └───────────────────────────────────────────────────────────┘
+                     ▲    ╰───────────┬──────────╯   ╰──────────────┬─────────────╯
+            connection dies    get SIGHUP, exit         no SIGHUP, keeps running
+```
+
+%indent 11
+- Lose the connection and you lose a client. Attach a new one.
+- And everything in tmux is a command. (We'll abuse that later.)
+
+=== words
+## The words
+
+```
+ server             one per socket; survives your connection
+  └─ session        what you attach to and detach from
+      └─ window     a full-screen tab, listed in the status bar
+          └─ pane   a split; each one is its own pty and program
+ client             a tmux process in your terminal, attached to one session
+```
+--- notes
+Point at the status bar: this slide is a window in session "talk", on the server at /srv/plug/talk.
+Everyone on the watch account is a read-only client. (Don't say how many: the head count after the fight shows it.)
+
+=== meanwhile
+## Meanwhile: a long-running job
+
+- Let's hand the server some real work right now
+- Claude Code, running in a tmux window, building something silly
+- I'll walk away and we'll check back later
+
+> "Hi Claude! Build a tmux powered game of life.
+>  I'll be back in a few minutes. Thanks, bud."
+--- notes
+C-b n, send the prompt, C-b n again right away. Don't watch it work.
+Before the talk: run `deck prep` from a plain ssh login (not inside the deck). It clears rehearsal
+leftovers (old Life build, private servers), rebuilds the deck, and checks Claude is logged in.
+
+=== !claude: cd ~/plug && claude
+--- notes
+Send the prompt and leave. Life shows up as a window named "life" right after this one.
+
+@act Basics
+=== keys
+## The keys (press C-b, then...)
+
+```
+ ?       Help! Every key binding
+
+ d       detach                     c       new window
+ n  p    next / previous window     ,       rename window
+ %       split left | right         "       split top / bottom
+ arrows  move between panes         z       zoom a pane
+ x       close a pane (asks y/n)    &       close a window (asks y/n)
+ [       scrollback (q quits)       s  w    session / window tree
+```
+
+$ tmux new -A -s work        # attach to "work", or create it
+$ tmux ls
+$ tmux attach -t work
+$ tmux kill-session -t work
+
+=== close-it
+## Basic Demo: close and reconnect!
+
+- This presentation, Claude, etc: all of it lives on a remote server.
+- We'll disconnect, ssh back in, and ask tmux what's there:
+
+$ tmux ls
+$ tmux attach -t talk
+--- notes
+Close the whole Ghostty window (not a tab). Pause. Anyone on watch still sees this slide.
+New window: ssh presentation@tmux.peat.org · tmux ls · tmux attach -t talk
+"talk ... (attached)" in tmux ls: with me gone, who's attached? (Tease it; the plot twist answers it.)
+Back on this slide: C-b p, C-b n a few times. Nothing moved. Claude is still working a few windows back.
+
+=== sharing
+## Many clients, one session
+
+- Any number of clients can attach to the same session
+- Everyone sees the same pane, and everyone types at once
+- Let's find out what that's like with a room full of people:
+
+$ ssh -p 443 demo@tmux.peat.org         password: plug
+--- notes
+Callback: "You just watched me leave and come back. Now let's add forty more of me."
+Give people a minute to connect. Then C-b n into the fight.
+Why 443: campus wifi may block outbound 22, never 443. Plain port 22 works too, if anyone asks.
+
+=== !fight: sudo -u demo env -u TMUX /usr/local/bin/tmux -L fight attach -t fight
+--- notes
+Let it run 2-3 minutes. Point at the "N fighters" counter. You can type too.
+
+=== !clients: ~/deck/clients.sh
+--- notes
+Flip back and forth with C-b p / C-b n: the mayhem, then the head count. Counts update every second.
+"What everyone brought" is each client's TERM: the box copes with all of them.
+
+=== how-fight-works
+## How the type-fight works
+
+- sshd `ForceCommand`: logging in as demo runs `tmux attach`
+- `set -g prefix None`: no tmux keys for you
+- `remain-on-exit` + a `pane-died` hook: typing `exit` respawns the shell
+- `window-size manual`: one phone can't shrink it for everyone
+- systemd runs it: kill the server and it's back in seconds
+- limits and no outbound network, because it's still a real shell
+
+> Chaos mode: try pair programming in vi.
+--- notes
+Fork bomb? Capped: 300 tasks, 2 GB, 1.5 CPUs for the fight (and 200 tasks / 1 GB per user). It only hurts the fight.
+
+@act Power Tools
+=== tds-pain
+## New problem: which session was this project?
+
+$ tmux ls
+$ tmux attach -t api? api2? work-api?
+
+> Doing the `tmux ls` and `tmux attach -t` dance to determine which session I should attach to for different projects is cumbersome and repetitive ... so ...
+
+=== tds
+## tds: one session per directory
+
+```
+function tds() {
+  local dir=${PWD##*/}
+  local md5=$(printf '%s' "$PWD" | md5sum | cut -d ' ' -f 1)
+  local session_name="${dir}-${md5:0:6}"
+  tmux new -As "$session_name"
+}
+```
+
+- `~/work/api` and `~/play/api` get different sessions: name plus a hash of the path
+- Part of the `tmux` plugin for Oh My Zsh
+--- notes
+It started as `td`. Reviewer carlosala: "there's a tool out there called td. Maybe tds is a great fit." Renamed 7 minutes later.
+
+=== !tds-demo: env -u TMUX bash --rcfile ~/deck/demo.bashrc -i
+--- notes
+C-b e. mkdir -p /tmp/example.com && cd /tmp/example.com && tds. Detach (C-b d), tds again: it reattaches.
+  (session is example_com-XXXXXX: the fix turned the . into _)
+The bug, the old way: command tmux new -As example.com, C-b d, then the same again.
+  Second time: "can't find pane: com". C-] back.
+
+=== tds-bug
+## But wait! A bug!
+
+$ cd ~/sites/example.com && tds      # first time: works
+$ tds                                # second time: ...
+
+```
+  directory       second tds
+  ───────────     ────────────────────────────
+  example.com     can't find pane: com-e71c75
+  a:b             can't find window: b-123456
+  %x              can't find pane: %x-123456
+  =y              can't find session: y-123456
+```
+
+- `tmux new -As NAME`: when NAME exists, it's looked up as a *target*
+
+> tmux has fancy parsing rules for targets! Interesting ...
+
+--- notes
+Target syntax: `:` separates session from window, `.` window from pane.
+A leading `$` `@` `%` means an id; a leading `=` means exact match.
+All four errors reproduced on tmux 3.8 on this box.
+
+=== tds-fix
+## The fix
+
+```
+dir=${dir//[.:]/_}         # separators anywhere
+dir=${dir/#[\$@%=]/_}      # id and exact-match markers at the start
+```
+
+- Six characters break reattaching: `.` `:` `$` `@` `%` `=`
+- `#` gets format-expanded, but consistently, so it still works
+
+> So a directory called `#{e|*:6,7}` gets a session named `42`! Very interesting ...
+
+@act Insane
+=== math
+## The format language does math
+
+$ tmux display -p '#{e|*:6,7}'
+42
+
+> Remember the directory that did multiplication? Same language.
+
+- `#{?cond,yes,no}` conditionals, `#{==:a,b}` comparisons
+- `@options` are variables. Hooks and `run -d` are loops.
+
+## That's most of a programming language.
+
+=== turing
+## Is tmux Turing complete?
+
+A computer needs three things:
+
+- **memory**: `@options`, as many as you like
+- **decisions**: `#{?cond,then,else}`
+- **a loop**: a config file that re-sources itself with `run -b -C -d` (no shell)
+
+Proof by construction:
+
+- Conway's Game of Life is Turing complete (Berlekamp, Conway & Guy, 1982)
+- Paul Rendell built a working Turing machine out of Life patterns (2000)
+- tmux runs Life. Life runs a Turing machine. So tmux is Turing complete.
+
+=== game-of-life
+## Conway's Game of Life (1970)
+
+- A grid of **cells**. Each cell is alive `█` or dead `·`
+- Every generation, each cell counts its 8 neighbors:
+  - dead, with exactly 3 alive: **born**
+  - alive, with 2 or 3: **survives**
+  - anything else: **dies** (lonely or crowded)
+- No players, no input. Set up the grid and watch.
+
+```
+  a glider, generations 0 to 4. After four, it has moved one cell diagonally.
+
+  ·█··   ····   ····   ····   ····
+  ··█·   █·█·   ··█·   ·█··   ··█·
+  ███·   ·██·   █·█·   ··██   ···█
+  ····   ·█··   ·██·   ·██·   ·███
+```
+
+=== how-life-works
+## Game of Life, mapped onto tmux
+
+- **board**: one tmux option per cell. `@c_ROW_COL` is 1 (alive) or 0 (dead)
+- **count**: add up the 8 neighbors with `#{e|+:a,b}`, save it in `@n_ROW_COL`
+- **rule**: `#{?#{==:#{@n},3},1,#{?#{&&:#{@c},#{==:#{@n},2}},1,0}}`
+  - 3 neighbors: alive. Alive with 2: stays alive. Anything else: dead.
+- **one generation**: count *every* cell first, then apply the rule (step.conf)
+- **loop**: step.conf ends by running itself again after a delay (`run -b -C -d`)
+- **screen**: the status bar draws the board, two rows per line
+
+=== !onecell: while ~/deck/onecell.sh; do :; done
+--- notes
+Enter through it: memory → count → rule → whole board (blinker) → pixels.
+Talking point at the count: those are real tmux commands, and tmux printed the 3.
+Talking point at the pixels: the same trick, five times over, is Claude's status-bar display.
+
+=== the-screen
+## The screen is the status bar
+
+- The board is 10 rows × 32 columns
+- A tmux status bar is at most 5 lines tall, so each line shows two board rows
+- Each character is two cells, one above the other:
+
+```
+   board rows 0 and 1          status line 0
+
+     ·  █  █  ·
+     █  █  ·  ·        →         ▄█▀
+```
+
+- `status-format[0]` to `[4]`: five format strings reading the `@c` options
+- When a step changes the options, tmux redraws the bar by itself
+
+=== check-in
+## Remember Claude?
+
+It's been building this the whole time.
+--- notes
+C-b w shows the window tree (good moment to show it). Pick "life". Talk through the README pane.
+C-b l jumps back to the last window.
+
+=== api
+## tmux is an API
+
+$ tmux send-keys -t build:1 'make test' Enter     # type into any pane
+$ tmux capture-pane -p -t build:1                 # read any pane
+$ tmux wait-for built                             # block until...
+$ tmux wait-for -S built                          # ...someone signals
+
+- Game servers have used `send-keys` as their admin console for over a decade
+- It's how AI agents drive interactive terminal apps
+
+=== grab-bag
+## Other things worth stealing
+
+$ tmux display-popup -E htop                # a floating UI on demand
+$ tmux setw synchronize-panes on            # type once, every pane gets it (careful)
+$ tmux pipe-pane -o 'cat >> ~/pane.log'     # a flight recorder
+$ tmux set -g remain-on-exit on             # a process supervisor...
+$ tmux set-hook -g pane-died respawn-pane   # ...please don't
+
+- `C-b Tab` (3.8): fuzzy switcher · `C-b *` (3.7): floating panes
+- tmux-resurrect + continuum: rebuild sessions after a reboot (layouts, directories, editors; not running state)
+
+@act Future
+=== directions
+## Where this goes: three directions
+
+- **More multiplexer**: Zellij (Rust, WASM plugins, web client), Superlogical's Rex
+- **Less multiplexer**: shpool, zmx, dtach, abduco. Persistence only; your WM does the splits.
+- **The terminal absorbs it**: WezTerm mux domains, iTerm2 `tmux -CC`
+
+=== rex
+## Superlogical's Rex
+
+- Mitchell Hashimoto (HashiCorp, Ghostty); company announced July 2026
+- Built on libghostty: server-side sessions for humans and AI agents
+- Public testing since October: macOS first, by invitation
+- Linux: the server already runs on it; the client isn't in testing yet
+- Fun fact: Ghostty now has more GitHub stars than tmux
+
+> You can't run the next tmux on Linux yet.
+
+=== tmux-next
+## tmux isn't standing still
+
+- 3.6 (Nov 2025): pane scrollbars, light/dark theme detection
+- 3.7 (Jun 2026): floating panes
+- 3.8 (Sep 2026): modal panes, built-in themes, the fuzzy switcher
+- 3.9 (on master now): popups are gone, rebuilt as floating panes
+- 4.0 (roadmap): save and restore state; upgrade the server without losing sessions
+- Still in OpenBSD base. Still a release every six months or so.
+--- notes
+Popups: nicm's commit of 2026-09-21, "Remove popups and all the associated overlay machinery". display-popup stays as an undocumented shim that opens a floating pane.
+4.0 items are from nicm's "3.9 & 4.0 Roadmap", GitHub issue #5406. Callback: resurrect, built in. And the server owning the ptys, now upgradable in place.
+
+@act Q&A
+=== thanks
+# Thanks!
+
+- The slides, the demos and the box: `github.com/peat/plug-tmux`
+- `tds`: a command in Oh My Zsh's tmux plugin
+- Brian P. Hogan, *tmux 3: Productive Mouse-Free Development* (Pragmatic, 2025)
+
+## Questions?
+--- notes
+Likely: "why switch from screen?" · zellij vs tmux · prefix C-a · mouse mode · clipboard (OSC 52) ·
+surviving reboots (resurrect) · systemd killing tmux on logout (loginctl enable-linger) · mosh + tmux ·
+reptyr for "I forgot to start it in tmux" · tmate for pairing · "why not systemd for everything?"
